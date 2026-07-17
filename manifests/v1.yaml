@@ -1,0 +1,13 @@
+version: v1
+description: E0 baseline + LLM NL->SQL fallback leg (noise-floor measurement config)
+agent:
+  router: vqr-first
+  nl2sql: anthropic:claude-sonnet-5
+  vqr_version: v0
+data:
+  snapshot: data/business.duckdb
+  docs_dir: data/docs
+eval:
+  bootstrap_resamples: 1000
+  scalar_rel_tol: 1.0e-6
+  fact_rel_tol: 0.02
