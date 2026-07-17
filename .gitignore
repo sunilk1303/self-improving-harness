@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Data / secrets (never commit real enterprise data or credentials)
+*.duckdb
+*.sqlite
+*.db
+data/
+snapshots/
+secrets/
+*.key
+*.pem
+
+# Node (if any tooling is added)
+node_modules/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
