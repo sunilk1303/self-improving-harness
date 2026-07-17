@@ -61,14 +61,17 @@ class NL2SQL:
     def answer(self, question_text: str, qid: str = ""):
         from .baseline import AgentAnswer
 
-        msg = self._client.messages.create(
-            model=self._model,
-            max_tokens=800,
-            messages=[{"role": "user",
-                       "content": PROMPT.format(schema=SCHEMA_DDL, question=question_text)}],
-        )
-        raw = "".join(b.text for b in msg.content if b.type == "text")
+        # Any failure — API (auth, billing, rate limit), validation, or
+        # execution — is a typed no_answer, never a crashed eval run.
         try:
+            msg = self._client.messages.create(
+                model=self._model,
+                max_tokens=800,
+                messages=[{"role": "user",
+                           "content": PROMPT.format(schema=SCHEMA_DDL,
+                                                    question=question_text)}],
+            )
+            raw = "".join(b.text for b in msg.content if b.type == "text")
             sql = validate_sql(raw)
             rows = self._con.execute(sql).fetchall()
         except Exception as exc:
