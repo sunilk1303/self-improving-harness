@@ -1,0 +1,13 @@
+version: v2
+description: E0 baseline + Azure OpenAI NL->SQL fallback leg
+agent:
+  router: vqr-first
+  nl2sql: azure-openai:gpt-4o    # the Azure *deployment* name, not the model family
+  vqr_version: v0
+data:
+  snapshot: data/business.duckdb
+  docs_dir: data/docs
+eval:
+  bootstrap_resamples: 1000
+  scalar_rel_tol: 1.0e-6
+  fact_rel_tol: 0.02

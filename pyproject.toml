@@ -14,7 +14,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
-llm = ["anthropic>=0.40"]
+llm = ["anthropic>=0.40", "openai>=1.50"]
 
 [tool.setuptools.packages.find]
 include = ["harness*"]

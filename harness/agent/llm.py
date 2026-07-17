@@ -1,6 +1,12 @@
-"""Optional LLM NL->SQL leg (Anthropic API). Requires ANTHROPIC_API_KEY.
+"""Optional LLM NL->SQL leg, provider-dispatched via the manifest spec.
 
-Enabled by setting the manifest's `agent.nl2sql` to e.g. `anthropic:claude-sonnet-5`.
+Manifest `agent.nl2sql` values:
+  - "anthropic:<model>"          e.g. anthropic:claude-sonnet-5
+                                 needs ANTHROPIC_API_KEY
+  - "azure-openai:<deployment>"  e.g. azure-openai:gpt-4o (the *deployment* name)
+                                 needs AZURE_OPENAI_API_KEY + AZURE_OPENAI_ENDPOINT
+                                 (AZURE_OPENAI_API_VERSION optional, default 2024-10-21)
+
 Read-only by construction: single SELECT statement, validated before execution.
 sqlglot-grade AST validation and EXPLAIN cost gates arrive with the production
 build; the E0 guard is a strict allowlist check.
@@ -35,10 +41,13 @@ Question: {question}
 
 _FORBIDDEN = re.compile(
     r"\b(insert|update|delete|drop|alter|create|attach|copy|pragma|call|install|load)\b", re.I)
+_FENCE = re.compile(r"^```[a-zA-Z]*\s*|\s*```$")
 
 
 def validate_sql(sql: str) -> str:
-    s = sql.strip().rstrip(";").strip()
+    s = sql.strip()
+    s = _FENCE.sub("", s).strip()  # models wrap in fences despite instructions
+    s = s.rstrip(";").strip()
     if ";" in s:
         raise ValueError("multiple statements are not allowed")
     if not re.match(r"^\s*(with|select)\b", s, re.I):
@@ -48,14 +57,63 @@ def validate_sql(sql: str) -> str:
     return s
 
 
-class NL2SQL:
-    def __init__(self, model: str, db_con):
-        if not os.environ.get("ANTHROPIC_API_KEY"):
-            raise RuntimeError("agent.nl2sql is enabled but ANTHROPIC_API_KEY is not set")
-        import anthropic  # optional extra: pip install .[llm]
+def _anthropic_completer(model: str):
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        raise RuntimeError("agent.nl2sql uses anthropic but ANTHROPIC_API_KEY is not set")
+    import anthropic  # optional extra: pip install .[llm]
 
-        self._client = anthropic.Anthropic()
-        self._model = model
+    client = anthropic.Anthropic()
+
+    def complete(prompt: str) -> str:
+        msg = client.messages.create(
+            model=model, max_tokens=800,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return "".join(b.text for b in msg.content if b.type == "text")
+
+    return complete
+
+
+def _azure_openai_completer(deployment: str):
+    key = os.environ.get("AZURE_OPENAI_API_KEY")
+    endpoint = os.environ.get("AZURE_OPENAI_ENDPOINT")
+    if not key or not endpoint:
+        raise RuntimeError(
+            "agent.nl2sql uses azure-openai but AZURE_OPENAI_API_KEY and/or "
+            "AZURE_OPENAI_ENDPOINT are not set")
+    from openai import AzureOpenAI  # optional extra: pip install .[llm]
+
+    client = AzureOpenAI(
+        api_key=key,
+        azure_endpoint=endpoint,
+        api_version=os.environ.get("AZURE_OPENAI_API_VERSION", "2024-10-21"),
+    )
+
+    def complete(prompt: str) -> str:
+        resp = client.chat.completions.create(
+            model=deployment,  # Azure routes by deployment name
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return resp.choices[0].message.content or ""
+
+    return complete
+
+
+_PROVIDERS = {
+    "anthropic": _anthropic_completer,
+    "azure-openai": _azure_openai_completer,
+}
+
+
+class NL2SQL:
+    def __init__(self, spec: str, db_con):
+        provider, _, model = spec.partition(":")
+        if not model:
+            raise ValueError(f"nl2sql spec must be '<provider>:<model>', got {spec!r}")
+        if provider not in _PROVIDERS:
+            raise ValueError(f"unknown nl2sql provider {provider!r}; "
+                             f"known: {sorted(_PROVIDERS)}")
+        self._complete = _PROVIDERS[provider](model)
         self._con = db_con
 
     def answer(self, question_text: str, qid: str = ""):
@@ -64,14 +122,7 @@ class NL2SQL:
         # Any failure — API (auth, billing, rate limit), validation, or
         # execution — is a typed no_answer, never a crashed eval run.
         try:
-            msg = self._client.messages.create(
-                model=self._model,
-                max_tokens=800,
-                messages=[{"role": "user",
-                           "content": PROMPT.format(schema=SCHEMA_DDL,
-                                                    question=question_text)}],
-            )
-            raw = "".join(b.text for b in msg.content if b.type == "text")
+            raw = self._complete(PROMPT.format(schema=SCHEMA_DDL, question=question_text))
             sql = validate_sql(raw)
             rows = self._con.execute(sql).fetchall()
         except Exception as exc:

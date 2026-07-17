@@ -79,7 +79,7 @@ class BaselineAgent:
         self._llm = None
         if nl2sql and nl2sql != "none":
             from .llm import NL2SQL  # optional dependency, imported lazily
-            self._llm = NL2SQL(model=nl2sql.split(":", 1)[1], db_con=self._con)
+            self._llm = NL2SQL(nl2sql, db_con=self._con)
 
     def _log(self, event_type: str, payload: dict) -> None:
         if self.ledger is not None:
