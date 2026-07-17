@@ -1,0 +1,13 @@
+version: v0
+description: E0 baseline harness — VQR-first router, no LLM leg
+agent:
+  router: vqr-first
+  nl2sql: none          # set to e.g. "anthropic:claude-sonnet-5" to enable the LLM leg
+  vqr_version: v0
+data:
+  snapshot: data/business.duckdb
+  docs_dir: data/docs
+eval:
+  bootstrap_resamples: 1000
+  scalar_rel_tol: 1.0e-6
+  fact_rel_tol: 0.02

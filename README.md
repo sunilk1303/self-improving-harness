@@ -30,6 +30,25 @@ Every credible self-improving system (2023–2026) is the same loop — **propos
 - **Humans are a metered, depletable resource** — typed durable approval queue, engagement checks, rubber-stamp alarms, approval futures, and the degradation principle: under stress the system loses autonomy before it loses oversight.
 - **Honest scope:** L1 self-improvement of the task pipeline. This system *recommends*; it does not execute business actions. Adding execution would require redoing the entire risk analysis.
 
+## Code: E0 baseline (experiment E0 of docs/07)
+
+The `harness/` package implements E0 — the measurement instrument that everything later is judged by:
+
+- `harness/synth/` — the **seeded synthetic-business generator** (SaaS subscription business in DuckDB) whose planted parameters *are* the hidden answers: segment-differentiated churn, a ticket-driven enterprise churn multiplier, an EU price change that drops margin, a discontinued plan, a resolution-time sign-flip, NULL traps, cents-vs-dollars. `questions.py` emits golden Q&A slices (public/private split by deterministic hash; rotation = reseed) plus tripwire probes, with every answer computed from trusted reference SQL at emission time.
+- `harness/agent/` — the **baseline agent**: verified-query-first router; optional LLM NL→SQL leg (`pip install -e .[llm]`, set `agent.nl2sql` in the manifest, export `ANTHROPIC_API_KEY`); it never guesses — uncovered questions produce typed `no_route` / `metric_fallback` limitation events.
+- `harness/evalkit/` — **execution-based scoring** (scalar/table/facts, tolerance-normalized), **paired-bootstrap gate statistics**, and **A/A calibration** (the noise-floor measurement E0 requires).
+- `harness/ledger.py` / `harness/manifest.py` — the hash-chained **audit ledger** with tamper detection, and the **manifest lockfile + label repoint** deploy/rollback mechanics.
+
+```bash
+python -m venv .venv && .venv/Scripts/pip install -e ".[dev]"
+python scripts/generate.py            # synthetic business + docs + golden slices -> data/
+python scripts/run_eval.py            # baseline agent over the public slice
+python scripts/aa_calibration.py      # gate noise floor (A/A)
+pytest -q
+```
+
+The E0 baseline intentionally covers only part of the question space (the VQR-routed strata score 100%; narrative/federated strata are unrouted headroom). That gap is what the self-improvement loop must earn in E3 — widening the VQR by hand to match the golden set would be eval contamination.
+
 ## Reference material
 
 - [`docs/references/`](docs/references/) — the four research digests (RSI prior art, enterprise data agents, governance/audit/HITL, agent evaluation), each with mechanism/evidence/relevance/failure-mode findings and sources.
