@@ -1,0 +1,13 @@
+version: v3
+description: E0 baseline + Azure OpenAI NL->SQL leg (deployment gpt-5-mini)
+agent:
+  router: vqr-first
+  nl2sql: azure-openai:gpt-5-mini   # Azure *deployment* name
+  vqr_version: v0
+data:
+  snapshot: data/business.duckdb
+  docs_dir: data/docs
+eval:
+  bootstrap_resamples: 1000
+  scalar_rel_tol: 1.0e-6
+  fact_rel_tol: 0.02
