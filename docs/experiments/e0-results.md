@@ -51,8 +51,21 @@ No kill criteria tripped.
 3. **A live billing failure crashed the first eval run** — now hardened: any LLM-leg failure degrades to a typed `no_answer` and the harness falls back to its VQR floor (the degradation principle, encountered in practice on day one).
 4. Azure env quirk to fix locally: `AZURE_OPENAI_API_VERSION` (User scope) currently holds a deployment name; runs override it to `2024-12-01-preview` at process level.
 
+## Update — expanded slice (359 questions) and the multi-generation finding
+
+*Run 2026-07-17, seed 1303, slice grown to 258 public / 101 private (7 tripwires).*
+
+| Slice | v0 | v3 | Notes |
+|---|---|---|---|
+| Public (258 q) | 0.733 | 0.919 | harder slice; more honest headroom than the 0.826 first cut |
+| Private (101 q) | 0.683 | 0.901 | |
+
+v3 public by stratum: single_table 1.00, multi_join 0.97, **narrative 0.60, federated 0.18**. The federated stratum (doc price vs invoiced average) is the hardest: the leg has no document access, so it can only answer the invoice half.
+
+**Key finding — slice size did not close the detection gap.** A/A over 4 v3 runs at one generation gave false-accept rate 0.0 but mean CI width **0.0594 (~±3 pts)** — slightly *wider* than the 109-question slice (0.0495). Growing n added high-variance LLM-routed questions (federated/narrative), and per-question score variance, not n, dominates the noise floor. The lever is **multi-generation scoring**: an n-generation mean score has per-question variance ∝ 1/n, so the CI width should scale ≈ 1/√n. gens=3 is predicted to bring ~±3 pts down to ~±1.7 pts, meeting the 2-pt target — being confirmed empirically next.
+
 ## Recommended next steps (E1 entry)
 
-1. Multi-generation scoring in the eval runner (n=3) + stratified slice growth toward 300 public questions → close the 2-pt detection gap.
-2. Analyst realism review of a 30-question sample (the one open E0 criterion).
-3. Then E1 proper: the gate-discipline suite of ~30 human-planted known-good/known-bad/hack changes, including the tier-derivation and probe-mutation checks.
+1. ✅/⏳ Multi-generation scoring — built; gens=3 A/A confirmation in progress to verify the CI narrows below the 2-pt target.
+2. Analyst realism review of a 30-question sample (the one open E0 criterion — needs a human).
+3. ✅ (S1) E1 gate-discipline suite: `harness/gate/` + 10 labeled candidates scoring 10/10 at the static stage. S2–S4 and the fuller suite remain — see [e1-plan.md](e1-plan.md).
