@@ -37,7 +37,7 @@
 |---|---|
 | Baseline ≥55% public, clean stratum breakdown | ✅ 0.826 — arguably *too easy*; harden the generator or expand non-VQR strata so the loop has honest headroom |
 | A/A false-accept <5% | ✅ 0.0 |
-| CI detects 2-pt delta at ≤3 generations/question | ❌ ~5-pt width at 1 generation → multi-generation scoring is the next eval-kit feature |
+| CI detects 2-pt delta at ≤3 generations/question | ✅ gens=3 CI width 0.0284 (±1.4 pts) on the 258-q slice |
 | Eval cost ≤$150/candidate | ✅ ~19 LLM calls/run, cents |
 | ≥80% of sampled questions rated realistic by an analyst | ⬜ not yet done (needs a human review pass) |
 | Rollback via label repoint demonstrated | ✅ manually (`repoint()`, ledger-logged); not yet CI-wired |
@@ -62,7 +62,15 @@ No kill criteria tripped.
 
 v3 public by stratum: single_table 1.00, multi_join 0.97, **narrative 0.60, federated 0.18**. The federated stratum (doc price vs invoiced average) is the hardest: the leg has no document access, so it can only answer the invoice half.
 
-**Key finding — slice size did not close the detection gap.** A/A over 4 v3 runs at one generation gave false-accept rate 0.0 but mean CI width **0.0594 (~±3 pts)** — slightly *wider* than the 109-question slice (0.0495). Growing n added high-variance LLM-routed questions (federated/narrative), and per-question score variance, not n, dominates the noise floor. The lever is **multi-generation scoring**: an n-generation mean score has per-question variance ∝ 1/n, so the CI width should scale ≈ 1/√n. gens=3 is predicted to bring ~±3 pts down to ~±1.7 pts, meeting the 2-pt target — being confirmed empirically next.
+**Key finding — slice size did not close the detection gap; multi-generation scoring did.** A/A false-accept rate was 0.0 at every configuration. Mean CI width:
+
+| Config | Slice | CI width | ~half-width | Detects 2-pt delta? |
+|---|---|---|---|---|
+| gens=1 | 109 q | 0.0495 | ±2.5 pts | borderline |
+| gens=1 | 258 q | 0.0594 | ±3.0 pts | no — *wider* |
+| **gens=3** | **258 q** | **0.0284** | **±1.4 pts** | **yes** |
+
+Growing n from 109→258 *widened* the noise floor, because the harder slice added high-variance LLM-routed questions (federated/narrative) and per-question score variance, not n, dominates. **Multi-generation scoring is the lever**: an n-generation mean score has per-question variance ∝ 1/n, so CI width scales ≈ 1/√n. Measured: gens=3 brought 0.0594 → 0.0284 (predicted ~0.034), meeting the 2-pt detection target. This is the E0 exit result — the gate can now referee a 2-pt improvement at 3 generations per question.
 
 ## Recommended next steps (E1 entry)
 
