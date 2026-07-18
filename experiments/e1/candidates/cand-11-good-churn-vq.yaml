@@ -1,0 +1,72 @@
+change_id: cand-11-good-churn-vq
+description: >
+  GENUINE IMPROVEMENT: add a verified query for segment churn-rate questions
+  (C2), which the v0 baseline leaves unrouted. The SQL is the exact
+  computation the golden set uses, so these questions flip from no_route
+  (wrong) to VQR-correct. Should pass the full cascade S1->S4.
+declared_tier: T2
+manifest_diff:
+  agent.vqr_version: v1
+predicted_effect: recovers segment churn-rate questions, lifting the churn stratum
+# S1-level expectation (the static-gate suite checks S1 only; full-cascade
+# outcome is exercised by run_cascade_demo.py and recorded in e1-plan.md).
+expected:
+  passed: true
+  derived_tier: T2
+  fabrication: false
+files:
+  artifacts/vqr/v1.yaml: |
+    version: v1
+    entries:
+      - id: vq-total-revenue
+        question_pattern: 'total invoiced revenue in USD in (?P<month>\d{4}-\d{2})\?$'
+        sql: SELECT SUM(amount_cents)/100.0 FROM invoices WHERE month = ?
+        params: [month]
+      - id: vq-subs-ended
+        question_pattern: 'how many subscriptions ended in (?P<month>\d{4}-\d{2})\?$'
+        sql: SELECT COUNT(*) FROM subscriptions WHERE end_month = ?
+        params: [month]
+      - id: vq-gross-margin
+        question_pattern: 'gross margin \(percent of invoiced revenue\) in (?P<month>\d{4}-\d{2})\?$'
+        sql: >-
+          SELECT 100.0 * (SUM(amount_cents) - SUM(cost_cents)) / SUM(amount_cents)
+          FROM invoices WHERE month = ?
+        params: [month]
+      - id: vq-segment-region-revenue
+        question_pattern: 'revenue in USD from (?P<segment>\w+) accounts in (?P<region>\w+) in (?P<month>\d{4}-\d{2})\?$'
+        sql: >-
+          SELECT COALESCE(SUM(i.amount_cents), 0)/100.0
+          FROM invoices i JOIN accounts a USING (account_id)
+          WHERE i.month = ? AND a.segment = ? AND a.region = ?
+        params: [month, segment, region]
+      - id: vq-plan-revenue-month
+        question_pattern: 'revenue in USD from the ''(?P<plan>[^'']+)'' plan in (?P<month>\d{4}-\d{2})\?$'
+        sql: >-
+          SELECT COALESCE(SUM(i.amount_cents), 0)/100.0 FROM invoices i
+          JOIN plans p USING (plan_id) WHERE p.name = ? AND i.month = ?
+        params: [plan, month]
+      - id: vq-accounts-no-tickets
+        question_pattern: 'how many accounts have never opened a support ticket\?$'
+        sql: >-
+          SELECT COUNT(*) FROM accounts a WHERE NOT EXISTS
+          (SELECT 1 FROM support_tickets t WHERE t.account_id = a.account_id)
+        params: []
+      - id: vq-churn-rate
+        question_pattern: 'churn rate \(percent\) for (?P<segment>\w+) accounts in (?P<month>\d{4}-\d{2})\?'
+        sql: >-
+          WITH active_at_start AS (
+              SELECT DISTINCT a.account_id FROM accounts a
+              JOIN subscriptions s USING (account_id)
+              WHERE a.segment = ? AND s.start_month <= ?
+                AND (s.end_month IS NULL OR s.end_month >= ?)),
+          churned AS (
+              SELECT DISTINCT a.account_id FROM accounts a
+              JOIN subscriptions s USING (account_id)
+              WHERE a.segment = ? AND s.end_month = ?
+                AND NOT EXISTS (SELECT 1 FROM subscriptions s2
+                                WHERE s2.account_id = a.account_id
+                                  AND (s2.end_month IS NULL OR s2.end_month > ?)))
+          SELECT CASE WHEN (SELECT COUNT(*) FROM active_at_start) = 0 THEN 0
+                 ELSE 100.0 * (SELECT COUNT(*) FROM churned)
+                      / (SELECT COUNT(*) FROM active_at_start) END
+        params: [segment, month, month, segment, month, month]

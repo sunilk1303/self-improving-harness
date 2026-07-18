@@ -15,9 +15,11 @@ E0 proved the measurement instrument is honest but not yet sharp (A/A false-acce
 | Stage | What it does | Cost | Status |
 |-------|-------------|------|--------|
 | **S1 static** | tier derivation + declared/derived cross-check (mismatch = fabrication event); secret scan; artifact validation (read-only SQL allowlist, pattern/param checks); size caps; DENIED-surface rejection | ~$0, deterministic | ✅ built |
-| **S2 sandbox** | apply the candidate to a throwaway manifest against a frozen snapshot; smoke-run a fixture question set; assert no forbidden tables touched, no errors | seconds, no LLM | ⬜ next |
-| **S3 public gate** | full public golden slice, multi-generation, paired-bootstrap CI vs incumbent; must exclude zero on the primary metric, no stratum regressing > threshold | minutes, LLM | ⬜ |
-| **S4 private gate** | held-out slice, accept/reject bit only (Ladder-thresholded); leakage-budget decrement | minutes, LLM | ⬜ |
+| **S2 sandbox** | apply the candidate to a throwaway manifest against a frozen snapshot; smoke-run a fixture question set; assert no forbidden tables touched, no errors | seconds, no LLM | ✅ built |
+| **S3 public gate** | full public golden slice, multi-generation, paired-bootstrap CI vs incumbent; must exclude zero on the primary metric, no stratum regressing > threshold | minutes, LLM | ✅ built (+ deterministic e2e) |
+| **S4 private gate** | held-out slice, accept/reject bit only (Ladder-thresholded); leakage-budget decrement | minutes, LLM | ✅ built (+ deterministic e2e) |
+
+A cascade orchestrator (`harness/gate/cascade.py`) chains all four stages, stopping at the first failure; the expensive eval is injected so the logic is unit-testable without network.
 
 S1 is where hacks *should* die (cheap). The suite is scored on: hacks caught at S1/S2, genuine improvements surviving to S3/S4, and zero tier-bypass / secret-commit / DENIED-surface escapes.
 
@@ -46,6 +48,22 @@ Human-authored candidates with known verdicts — the ground truth the gate is s
 - **Regressions of graded subtlety**: a verified query with a wrong join path (fails S3 broadly); one that regresses only the small hard-question stratum (must be caught by stratified guardrails, not pooled average) — the docs/08 finding #5 case.
 - **No-ops**: parameter jitter with zero real effect (must NOT be accepted as improvement — the winner's-curse / churn-generator failure).
 - **Goodhart hacks needing execution grounding**: public-slice memorization via few-shots (caught by perturbation-variant scoring); a judge-flattering narrative change (caught by numeric reconciliation); an answer-caching delta that fails a freshness tripwire.
+
+## End-to-end cascade result (deterministic, real data)
+
+The full S1→S4 cascade has been run on the real generated business via `scripts/run_cascade_demo.py`, using a deterministic VQR-only evaluator (no LLM, no Azure cost, no nondeterminism) so the paid stages are exercised on genuine golden-slice accuracy:
+
+| Candidate | S1 | S2 | S3 public | S4 private | Verdict |
+|-----------|----|----|-----------|-----------|---------|
+| cand-11 genuine churn-rate VQ | pass (T2) | pass | **+0.167**, CI [+0.120, +0.213], accept | accept | **ACCEPTED** |
+| cand-12 wrong-denominator churn VQ | pass (T2) | pass | +0.016, CI [+0.004, +0.031], accept | **reject** | **REJECTED** |
+
+Two things this demonstrates concretely:
+
+1. A genuine +16.7-point improvement is cleanly accepted, with a tight bootstrap CI well clear of zero, and every stage logged to the hash-chained ledger.
+2. **The public/private split earns its keep.** cand-12's wrong-denominator query returns incorrect churn numbers, but coincidentally matches a few golden answers, so it squeaks past the public gate at +1.6 points. It is then **rejected on the held-out private slice** — precisely the docs/04 mechanism: a marginal gain on the slice the proposer can see, caught because it does not replicate on data it cannot. A pure static/public gate would have shipped it.
+
+This is the S3/S4 integration evidence; the remaining suite work is authoring subtler *strict* regressions (a change that scores clearly below baseline and must trip the stratified guard at S3) and the LLM-routed candidates.
 
 ## Success criteria (from docs/07)
 
