@@ -16,11 +16,12 @@ VQR to match the golden set, which would be eval contamination by hand.
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from pathlib import Path
 
 import duckdb
+
+from .vqr import ARTIFACTS_DIR, load_vqr
 
 
 @dataclass
@@ -31,50 +32,15 @@ class AgentAnswer:
     detail: str = ""
 
 
-# --- Verified Query Repository (v0) ----------------------------------------
-# Each entry: (vqr_id, compiled question pattern, SQL, param builder)
-MONTH = r"(?P<month>\d{4}-\d{2})"
-
-VQR = [
-    ("vq-total-revenue",
-     re.compile(rf"total invoiced revenue in USD in {MONTH}\?$", re.I),
-     "SELECT SUM(amount_cents)/100.0 FROM invoices WHERE month = ?",
-     lambda m: [m["month"]]),
-    ("vq-subs-ended",
-     re.compile(rf"how many subscriptions ended in {MONTH}\?$", re.I),
-     "SELECT COUNT(*) FROM subscriptions WHERE end_month = ?",
-     lambda m: [m["month"]]),
-    ("vq-gross-margin",
-     re.compile(rf"gross margin \(percent of invoiced revenue\) in {MONTH}\?$", re.I),
-     "SELECT 100.0 * (SUM(amount_cents) - SUM(cost_cents)) / SUM(amount_cents) "
-     "FROM invoices WHERE month = ?",
-     lambda m: [m["month"]]),
-    ("vq-segment-region-revenue",
-     re.compile(rf"revenue in USD from (?P<segment>\w+) accounts in (?P<region>\w+) "
-                rf"in {MONTH}\?$", re.I),
-     "SELECT COALESCE(SUM(i.amount_cents), 0)/100.0 "
-     "FROM invoices i JOIN accounts a USING (account_id) "
-     "WHERE i.month = ? AND a.segment = ? AND a.region = ?",
-     lambda m: [m["month"], m["segment"], m["region"]]),
-    ("vq-plan-revenue-month",
-     re.compile(rf"revenue in USD from the '(?P<plan>[^']+)' plan in {MONTH}\?$", re.I),
-     "SELECT COALESCE(SUM(i.amount_cents), 0)/100.0 FROM invoices i "
-     "JOIN plans p USING (plan_id) WHERE p.name = ? AND i.month = ?",
-     lambda m: [m["plan"], m["month"]]),
-    ("vq-accounts-no-tickets",
-     re.compile(r"how many accounts have never opened a support ticket\?$", re.I),
-     "SELECT COUNT(*) FROM accounts a WHERE NOT EXISTS "
-     "(SELECT 1 FROM support_tickets t WHERE t.account_id = a.account_id)",
-     lambda m: []),
-]
-
-
 class BaselineAgent:
-    def __init__(self, manifest: dict, ledger=None):
+    def __init__(self, manifest: dict, ledger=None, vqr_artifacts_dir=None):
         self.manifest = manifest
         self.ledger = ledger
         self.db_path = manifest["data"]["snapshot"]
         self._con = duckdb.connect(str(Path(self.db_path)), read_only=True)
+        # VQR is a manifest-pinned artifact, not code: load the pinned version.
+        vqr_version = manifest["agent"].get("vqr_version", "v0")
+        self._vqr = load_vqr(vqr_version, vqr_artifacts_dir or ARTIFACTS_DIR)
         nl2sql = manifest["agent"].get("nl2sql", "none")
         self._llm = None
         if nl2sql and nl2sql != "none":
@@ -88,21 +54,22 @@ class BaselineAgent:
 
     def answer(self, question_text: str, qid: str = "") -> AgentAnswer:
         # 1) verified queries — the governed path
-        for vqr_id, pattern, sql, build in VQR:
-            m = pattern.search(question_text.strip())
+        for entry in self._vqr:
+            m = entry.match(question_text)
             if m:
                 try:
-                    rows = self._con.execute(sql, build(m.groupdict())).fetchall()
+                    rows = self._con.execute(entry.sql, entry.bind(m)).fetchall()
                 except Exception as exc:  # execution failure is a typed limitation
                     self._log("limitation_registered",
-                              {"type": "sql_error", "qid": qid, "route": f"vqr:{vqr_id}",
-                               "error": str(exc)[:500]})
-                    return AgentAnswer("no_answer", None, f"vqr:{vqr_id}", str(exc)[:200])
+                              {"type": "sql_error", "qid": qid,
+                               "route": f"vqr:{entry.id}", "error": str(exc)[:500]})
+                    return AgentAnswer("no_answer", None, f"vqr:{entry.id}",
+                                       str(exc)[:200])
                 if len(rows) == 1 and len(rows[0]) == 1:
                     v = rows[0][0]
                     return AgentAnswer("scalar", float(v) if v is not None else 0.0,
-                                       f"vqr:{vqr_id}")
-                return AgentAnswer("table", [list(r) for r in rows], f"vqr:{vqr_id}")
+                                       f"vqr:{entry.id}")
+                return AgentAnswer("table", [list(r) for r in rows], f"vqr:{entry.id}")
 
         # 2) LLM NL->SQL fallback — every use is a coverage-gap signal
         if self._llm is not None:
