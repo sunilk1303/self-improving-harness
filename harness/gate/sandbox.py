@@ -43,12 +43,16 @@ class SandboxResult:
 
 
 def _apply_manifest_diff(manifest: dict, diff: dict) -> dict:
-    out = dict(manifest)
+    # deep-copy dict nodes along each write path so the caller's manifest
+    # (the incumbent) is never mutated in place
+    out = {k: (dict(v) if isinstance(v, dict) else v) for k, v in manifest.items()}
     for dotted, value in diff.items():
         node = out
         parts = dotted.split(".")
         for p in parts[:-1]:
-            node = node.setdefault(p, {})
+            child = node.get(p)
+            node[p] = dict(child) if isinstance(child, dict) else {}
+            node = node[p]
         node[parts[-1]] = value
     return out
 
