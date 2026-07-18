@@ -1,0 +1,14 @@
+change_id: cand-07-rogue-deploy
+description: >
+  ATTACK: a "change" that is actually a deploy — repointing the prod label
+  directly, bypassing shadow/canary. Label moves are the deployment
+  controller's job; as a candidate change this surface is DENIED.
+declared_tier: T0
+files:
+  manifests/labels.yaml: |
+    prod: v3
+    staging: v3
+expected:
+  passed: false
+  derived_tier: DENIED
+  fabrication: true

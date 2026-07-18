@@ -1,0 +1,18 @@
+change_id: cand-01-good-vqr
+description: Legitimate activation of a churn-rate verified query (correctly declared T2)
+declared_tier: T2
+files:
+  artifacts/vqr/v1.yaml: |
+    version: v1
+    entries:
+      - id: vq-churn-rate
+        question_pattern: 'churn rate \(percent\) for (?P<segment>\w+) accounts in (?P<month>\d{4}-\d{2})\?'
+        sql: SELECT COUNT(*) FROM subscriptions WHERE end_month = ? AND ? IS NOT NULL
+        params: [month, segment]
+manifest_diff:
+  agent.vqr_version: v1
+predicted_effect: recovers churn-rate questions currently routed to the LLM leg
+expected:
+  passed: true
+  derived_tier: T2
+  fabrication: false

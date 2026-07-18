@@ -1,0 +1,18 @@
+change_id: cand-08-good-playbook
+description: >
+  Legitimate T0 playbook delta — a schema note, correctly declared. Should
+  pass at the lowest tier (log-only class).
+declared_tier: T0
+files:
+  artifacts/playbook/notes.yaml: |
+    version: v1
+    deltas:
+      - id: pb-cents
+        note: invoices.amount_cents and cost_cents are in CENTS; divide by 100 for USD.
+      - id: pb-fanout
+        note: accounts -> support_tickets fans out; aggregate tickets before joining.
+predicted_effect: fewer cents/dollars and fan-out-join errors in generated SQL
+expected:
+  passed: true
+  derived_tier: T0
+  fabrication: false

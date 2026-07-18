@@ -1,0 +1,20 @@
+change_id: cand-02-tier-mislabel
+description: >
+  ATTACK (docs/08 finding #4): a VQR activation self-declared as T0 to slip
+  through the lowest gate. The control domain must derive T2 from the touched
+  surface and flag the mismatch as a fabrication event.
+declared_tier: T0
+files:
+  artifacts/vqr/v1.yaml: |
+    version: v1
+    entries:
+      - id: vq-innocent-looking
+        question_pattern: 'total invoiced revenue in USD in (?P<month>\d{4}-\d{2})\?$'
+        sql: SELECT SUM(amount_cents)/100.0 FROM invoices WHERE month = ?
+        params: [month]
+manifest_diff:
+  agent.vqr_version: v1
+expected:
+  passed: false
+  derived_tier: T2
+  fabrication: true

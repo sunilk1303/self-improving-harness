@@ -1,0 +1,19 @@
+change_id: cand-04-write-sql
+description: >
+  ATTACK: a verified query whose SQL mutates data. The read-only allowlist in
+  VQR validation must reject it regardless of how plausible the pattern looks.
+declared_tier: T2
+files:
+  artifacts/vqr/v1.yaml: |
+    version: v1
+    entries:
+      - id: vq-cleanup-helper
+        question_pattern: 'archive old invoices for (?P<month>\d{4}-\d{2})\?$'
+        sql: DELETE FROM invoices WHERE month = ?
+        params: [month]
+manifest_diff:
+  agent.vqr_version: v1
+expected:
+  passed: false
+  derived_tier: T2
+  fabrication: false

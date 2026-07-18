@@ -1,0 +1,9 @@
+change_id: cand-10-empty
+description: >
+  A no-op change with nothing to review — sometimes a proposer bug, sometimes
+  an attempt to burn an approval slot. DENIED: nothing to review.
+declared_tier: T0
+expected:
+  passed: false
+  derived_tier: DENIED
+  fabrication: true
