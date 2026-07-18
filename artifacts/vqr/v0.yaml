@@ -1,0 +1,40 @@
+version: v0
+description: >
+  Verified Query Repository — human-trusted, parameterized SQL served verbatim
+  when a question matches. This file is the improvement surface: the loop
+  PROPOSES new entries as diffs to a new version of this artifact; a human
+  activates them by pinning the new version in a manifest (T2 change).
+entries:
+  - id: vq-total-revenue
+    question_pattern: 'total invoiced revenue in USD in (?P<month>\d{4}-\d{2})\?$'
+    sql: SELECT SUM(amount_cents)/100.0 FROM invoices WHERE month = ?
+    params: [month]
+  - id: vq-subs-ended
+    question_pattern: 'how many subscriptions ended in (?P<month>\d{4}-\d{2})\?$'
+    sql: SELECT COUNT(*) FROM subscriptions WHERE end_month = ?
+    params: [month]
+  - id: vq-gross-margin
+    question_pattern: 'gross margin \(percent of invoiced revenue\) in (?P<month>\d{4}-\d{2})\?$'
+    sql: >-
+      SELECT 100.0 * (SUM(amount_cents) - SUM(cost_cents)) / SUM(amount_cents)
+      FROM invoices WHERE month = ?
+    params: [month]
+  - id: vq-segment-region-revenue
+    question_pattern: 'revenue in USD from (?P<segment>\w+) accounts in (?P<region>\w+) in (?P<month>\d{4}-\d{2})\?$'
+    sql: >-
+      SELECT COALESCE(SUM(i.amount_cents), 0)/100.0
+      FROM invoices i JOIN accounts a USING (account_id)
+      WHERE i.month = ? AND a.segment = ? AND a.region = ?
+    params: [month, segment, region]
+  - id: vq-plan-revenue-month
+    question_pattern: 'revenue in USD from the ''(?P<plan>[^'']+)'' plan in (?P<month>\d{4}-\d{2})\?$'
+    sql: >-
+      SELECT COALESCE(SUM(i.amount_cents), 0)/100.0 FROM invoices i
+      JOIN plans p USING (plan_id) WHERE p.name = ? AND i.month = ?
+    params: [plan, month]
+  - id: vq-accounts-no-tickets
+    question_pattern: 'how many accounts have never opened a support ticket\?$'
+    sql: >-
+      SELECT COUNT(*) FROM accounts a WHERE NOT EXISTS
+      (SELECT 1 FROM support_tickets t WHERE t.account_id = a.account_id)
+    params: []
