@@ -23,6 +23,8 @@ def main() -> None:
     ap.add_argument("--label", default="prod")
     ap.add_argument("--slice", default="public", choices=["public", "private"])
     ap.add_argument("--data", default="data")
+    ap.add_argument("--generations", type=int, default=1,
+                    help="answers per question; LLM-routed questions only re-run")
     args = ap.parse_args()
 
     manifest = resolve_label(args.label)
@@ -32,7 +34,8 @@ def main() -> None:
 
     slice_path = Path(args.data) / "golden" / f"{args.slice}.jsonl"
     report_path = Path(args.data) / "reports" / f"eval-{version}-{args.slice}.json"
-    report = run_slice_file(agent, slice_path, version, ledger, report_path)
+    report = run_slice_file(agent, slice_path, version, ledger, report_path,
+                            generations=args.generations)
     agent.close()
 
     printable = {k: v for k, v in report.items() if k != "per_question"}

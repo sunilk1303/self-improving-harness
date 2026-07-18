@@ -24,7 +24,7 @@ from pathlib import Path
 
 import duckdb
 
-from .generator import PlantedParams, month_seq
+from .generator import PLANS, PlantedParams, month_seq
 
 PRIVATE_FRACTION = 0.25
 SPLIT_SALT = "e0-split-v1"
@@ -73,9 +73,9 @@ def emit(db_path: str | Path, params: PlantedParams) -> list[Question]:
         add(Question(f"R1-{m}", "revenue", "single_table",
                      f"What was total invoiced revenue in USD in {m}?", "scalar", v))
 
-    for m in active_months[::2]:
+    for m in active_months:
         for seg in ["smb", "mid", "enterprise"]:
-            for reg in ["NA", "EU"]:
+            for reg in ["NA", "EU", "APAC"]:
                 v = _scalar(con, """
                     SELECT COALESCE(SUM(i.amount_cents), 0)/100.0
                     FROM invoices i JOIN accounts a USING (account_id)
@@ -83,6 +83,17 @@ def emit(db_path: str | Path, params: PlantedParams) -> list[Question]:
                 add(Question(f"R2-{m}-{seg}-{reg}", "revenue", "multi_join",
                              f"What was total invoiced revenue in USD from {seg} accounts "
                              f"in {reg} in {m}?", "scalar", v))
+
+    # facts: best revenue month per year
+    for year in sorted({m[:4] for m in active_months}):
+        row = con.execute("""
+            SELECT month, SUM(amount_cents)/100.0 AS rev FROM invoices
+            WHERE month LIKE ? GROUP BY 1 ORDER BY rev DESC LIMIT 1""",
+            [f"{year}-%"]).fetchone()
+        add(Question(f"R5-{year}", "revenue", "narrative",
+                     f"Which month in {year} had the highest total invoiced revenue, "
+                     f"and how much (USD)?",
+                     "facts", {"month": row[0], "revenue": round(float(row[1]), 2)}))
 
     for year in sorted({m[:4] for m in active_months}):
         row = con.execute("""
@@ -131,14 +142,38 @@ def emit(db_path: str | Path, params: PlantedParams) -> list[Question]:
         SELECT CASE WHEN (SELECT COUNT(*) FROM active_at_start) = 0 THEN 0
                ELSE 100.0 * (SELECT COUNT(*) FROM churned)
                     / (SELECT COUNT(*) FROM active_at_start) END"""
-    for m in active_months[::3]:
-        for seg in ["smb", "enterprise"]:
+    for m in active_months:
+        for seg in ["smb", "mid", "enterprise"]:
             v = _scalar(con, churn_rate_sql, seg, m, m, seg, m, m)
             add(Question(f"C2-{m}-{seg}", "churn", "multi_join",
                          f"What was the account churn rate (percent) for {seg} accounts "
                          f"in {m}? Churn = account's last subscription ended that month; "
                          f"denominator = accounts active at the start of the month.",
                          "scalar", v))
+
+    # facts: the planted ticket-churn relationship, surfaced as a golden
+    row = con.execute("""
+        WITH ent AS (
+            SELECT a.account_id,
+                   (SELECT COUNT(*) FROM support_tickets t
+                    WHERE t.account_id = a.account_id
+                      AND t.resolved_date IS NULL) AS unresolved,
+                   EXISTS (SELECT 1 FROM subscriptions s
+                           WHERE s.account_id = a.account_id
+                             AND s.end_month IS NULL) AS active
+            FROM accounts a WHERE a.segment = 'enterprise')
+        SELECT 100.0 * SUM(CASE WHEN unresolved > 2 AND NOT active THEN 1 ELSE 0 END)
+                     / NULLIF(SUM(CASE WHEN unresolved > 2 THEN 1 ELSE 0 END), 0),
+               100.0 * SUM(CASE WHEN unresolved <= 2 AND NOT active THEN 1 ELSE 0 END)
+                     / NULLIF(SUM(CASE WHEN unresolved <= 2 THEN 1 ELSE 0 END), 0)
+        FROM ent""").fetchone()
+    if row and row[0] is not None and row[1] is not None:
+        add(Question("C5-ticket-churn-link", "churn", "narrative",
+                     "Among enterprise accounts, compare the share that churned between "
+                     "accounts with more than 2 unresolved support tickets and those "
+                     "with 2 or fewer. Give both percentages.",
+                     "facts", {"high_ticket_churned_pct": round(float(row[0]), 2),
+                               "low_ticket_churned_pct": round(float(row[1]), 2)}))
 
     v = _scalar(con, """
         SELECT COUNT(DISTINCT a.account_id)
@@ -165,7 +200,7 @@ def emit(db_path: str | Path, params: PlantedParams) -> list[Question]:
                  "facts", {"segment": rows[0][0], "churned_pct": round(float(rows[0][1]), 2)}))
 
     # ---- margin ------------------------------------------------------------
-    for m in active_months[::2]:
+    for m in active_months:
         v = _scalar(con, """
             SELECT 100.0 * (SUM(amount_cents) - SUM(cost_cents)) / SUM(amount_cents)
             FROM invoices WHERE month = ?""", m)
@@ -173,7 +208,7 @@ def emit(db_path: str | Path, params: PlantedParams) -> list[Question]:
                      f"What was gross margin (percent of invoiced revenue) in {m}?",
                      "scalar", v))
 
-    for m in months[pci:pci + 6:2]:
+    for m in months[pci:pci + 8:2]:
         row = con.execute("""
             SELECT a.region,
                    100.0 * (SUM(i.amount_cents) - SUM(i.cost_cents)) / SUM(i.amount_cents) AS gm
@@ -183,18 +218,42 @@ def emit(db_path: str | Path, params: PlantedParams) -> list[Question]:
                      f"Which region had the lowest gross margin in {m}, and what was it "
                      f"(percent)?", "table", [[row[0], round(float(row[1]), 4)]]))
 
-    # federated: stale pricing doc vs actual EU enterprise invoicing
-    m_after = months[pci + 1]
-    inv_avg = _scalar(con, """
-        SELECT AVG(i.amount_cents)/100.0 FROM invoices i
-        JOIN accounts a USING (account_id) JOIN plans p USING (plan_id)
-        WHERE a.region = 'EU' AND p.name = 'Enterprise' AND i.month = ?""", m_after)
-    add(Question("M3-doc-vs-invoice", "margin", "federated",
-                 f"According to the pricing policy document, what is the Enterprise plan's "
-                 f"monthly list price, and does it match the average invoiced amount for EU "
-                 f"Enterprise-plan accounts in {m_after}? Give both numbers.",
-                 "facts", {"doc_price": 1999.00, "invoiced_avg": round(inv_avg, 2),
-                           "match": "no"}))
+    # facts: the planted EU margin drop, surfaced as a golden
+    eu_margin = lambda ms: _scalar(con, f"""
+        SELECT 100.0 * (SUM(i.amount_cents) - SUM(i.cost_cents)) / SUM(i.amount_cents)
+        FROM invoices i JOIN accounts a USING (account_id)
+        WHERE a.region = 'EU' AND i.month IN ({','.join('?' * len(ms))})""", *ms)
+    mb, ma = eu_margin(months[pci - 3:pci]), eu_margin(months[pci:pci + 3])
+    add(Question("M4-eu-margin-shift", "margin", "narrative",
+                 f"How did EU gross margin change after the {pc} price change? Give the "
+                 f"margin (percent) for the three months before and the three months "
+                 f"from {pc}.",
+                 "facts", {"before_pct": round(mb, 2), "after_pct": round(ma, 2),
+                           "direction": "decreased" if ma < mb else "increased"}))
+
+    # federated: pricing doc vs actual invoicing, parameterized. The doc is
+    # deliberately stale for EU after the price change (match: no); elsewhere
+    # it still matches (match: yes) — so "match" cannot be pattern-guessed.
+    doc_price = {name: price / 100.0 for name, _, price, _ in PLANS}
+    for plan in ["Starter", "Growth", "Scale", "Enterprise"]:
+        for reg in ["NA", "EU"]:
+            for m in [months[pci - 2], months[pci + 1], months[pci + 3]]:
+                inv_avg = _scalar(con, """
+                    SELECT AVG(i.amount_cents)/100.0 FROM invoices i
+                    JOIN accounts a USING (account_id) JOIN plans p USING (plan_id)
+                    WHERE a.region = ? AND p.name = ? AND i.month = ?""",
+                    reg, plan, m)
+                if not inv_avg:
+                    continue  # no accounts on this plan/region/month
+                matches = abs(inv_avg - doc_price[plan]) / doc_price[plan] < 0.01
+                add(Question(f"M3-{plan}-{reg}-{m}", "margin", "federated",
+                             f"According to the pricing policy document, what is the "
+                             f"{plan} plan's monthly list price, and does it match the "
+                             f"average invoiced amount for {plan}-plan accounts in {reg} "
+                             f"in {m}? Give both numbers.",
+                             "facts", {"doc_price": doc_price[plan],
+                                       "invoiced_avg": round(inv_avg, 2),
+                                       "match": "yes" if matches else "no"}))
 
     # ---- tripwires ----------------------------------------------------------
     disc_after_idx = months.index(params.discontinued_after)
@@ -231,6 +290,15 @@ def emit(db_path: str | Path, params: PlantedParams) -> list[Question]:
     add(Question("T3-no-tickets", "churn", "single_table",
                  "How many accounts have never opened a support ticket?", "scalar", v,
                  tripwire=True, meta={"trap": "naive NOT IN + NULL returns wrong count"}))
+
+    # out-of-history months: plausible answer nonzero, correct answer 0
+    y0, m0 = (int(x) for x in params.start_month.split("-"))
+    for k in (1, 2):
+        yy, mm = (y0, m0 - k) if m0 - k >= 1 else (y0 - 1, 12 + m0 - k)
+        pre = f"{yy:04d}-{mm:02d}"
+        add(Question(f"T5-{pre}", "revenue", "single_table",
+                     f"What was total invoiced revenue in USD in {pre}?", "scalar", 0.0,
+                     tripwire=True, meta={"trap": "month predates company history"}))
 
     con.close()
     return questions

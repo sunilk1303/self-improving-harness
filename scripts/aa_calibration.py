@@ -29,6 +29,8 @@ def main() -> None:
     ap.add_argument("--runs", type=int, default=10)
     ap.add_argument("--label", default="prod")
     ap.add_argument("--data", default="data")
+    ap.add_argument("--generations", type=int, default=1,
+                    help="answers per question per run; LLM-routed only re-run")
     args = ap.parse_args()
 
     manifest = resolve_label(args.label)
@@ -38,13 +40,14 @@ def main() -> None:
     run_scores = []
     for i in range(args.runs):
         agent = BaselineAgent(manifest)  # no ledger: A/A runs are calibration, not serving
-        report = run_slice_file(agent, slice_path, version)
+        report = run_slice_file(agent, slice_path, version,
+                                generations=args.generations)
         agent.close()
-        scores = [1.0 if r["correct"] else 0.0 for r in report["per_question"]]
-        run_scores.append(scores)
+        run_scores.append([r["score"] for r in report["per_question"]])
         print(f"run {i + 1}/{args.runs}: accuracy={report['accuracy']}")
 
     result = aa_calibration(run_scores)
+    result["generations"] = args.generations
     print(json.dumps(result, indent=2))
 
     ledger = Ledger(Path(args.data) / "ledger.jsonl")

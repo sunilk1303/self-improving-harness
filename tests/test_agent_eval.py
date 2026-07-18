@@ -26,11 +26,11 @@ def test_vqr_answers_are_correct_and_gaps_are_typed(db_path, questions, tmp_path
 
     # the governed path must be exactly right wherever it routes
     assert vqr, "VQR matched nothing — router patterns are broken"
-    assert all(r["correct"] for r in vqr)
+    assert all(r["score"] == 1.0 for r in vqr)
 
     # honest headroom: part of the space is deliberately unrouted at E0
     assert no_route, "expected uncovered questions at E0"
-    assert all(not r["correct"] for r in no_route)
+    assert all(r["score"] == 0.0 for r in no_route)
 
     # overall accuracy = VQR coverage; sane band, not suspiciously high
     assert 0.30 < report["accuracy"] < 0.90
